@@ -13,6 +13,12 @@ This project is an interactive art canvas using OpenCV and MediaPipe for hand ge
 - OpenCV
 - MediaPipe
 - NumPy
+- math
+- pillow
+- imutils
+- pyautogui
+- pwcaw
+- sklearn
 
 ## Installation
 
