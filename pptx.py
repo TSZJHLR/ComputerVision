@@ -1,89 +1,90 @@
-import cv2
-import numpy as np
-import pyautogui
+import cv2  # import opencv library for image processing
+import mediapipe as mp  # import mediapipe for hand tracking
+import pyautogui  # import pyautogui for controlling powerpoint
+import time  # import time module for time-related operations
 
-# Constants for gesture detection
-GESTURE_THRESHOLD = 50  # Minimum pixels for a gesture to be detected
+# initialize mediapipe hands
+mp_hands = mp.solutions.hands
+hands = mp_hands.Hands(max_num_hands=1)  # initialize hands tracker with max 1 hand
+mp_draw = mp.solutions.drawing_utils  # utility functions for drawing landmarks
 
-# Function to control PowerPoint based on gestures
+# initialize opencv video capture
+cap = cv2.VideoCapture(0)  # capture video from default camera (index 0)
+
+# constants for box dimensions
+FRAME_WIDTH = 640
+FRAME_HEIGHT = 480
+BOX_WIDTH = 150
+BOX_HEIGHT = 480
+
+LEFT_BOX = (0, 0, BOX_WIDTH, BOX_HEIGHT)  # dimensions of the left box
+RIGHT_BOX = (FRAME_WIDTH - BOX_WIDTH, 0, BOX_WIDTH, BOX_HEIGHT)  # dimensions of the right box
+
+# cooldown time in seconds
+COOLDOWN_TIME = 1.0
+last_action_time = time.time()
+
+# function to control powerpoint based on gestures
 def control_powerpoint(direction):
-    if direction == "left":
-        pyautogui.hotkey('left')  # Simulate left arrow key press
-        print("Swipe left detected - Moving to previous slide")
-    elif direction == "right":
-        pyautogui.hotkey('right')  # Simulate right arrow key press
-        print("Swipe right detected - Moving to next slide")
+    global last_action_time
+    current_time = time.time()
+    if current_time - last_action_time > COOLDOWN_TIME:
+        if direction == "left":
+            pyautogui.press('left')  # simulate left arrow key press with pyautogui
+            print("hand in left box - moving to previous slide")
+        elif direction == "right":
+            pyautogui.press('right')  # simulate right arrow key press with pyautogui
+            print("hand in right box - moving to next slide")
+        last_action_time = current_time
 
-# Main function to process video feed and detect gestures
+# main function to process video feed and detect gestures
 def main():
-    cap = cv2.VideoCapture(0)  # Open default camera
+    cap = cv2.VideoCapture(0)  # open default camera
     if not cap.isOpened():
-        print("Error: Failed to capture video.")
+        print("error: failed to capture video.")
         return
     
-    # Variables for gesture detection
-    start_x = None
-    gesture_detected = False
-    
     while True:
-        ret, frame = cap.read()
+        ret, frame = cap.read()  # read a frame from the camera
         if not ret:
-            print("Error: Failed to capture frame from camera.")
+            print("error: failed to capture frame from camera.")
             break
         
-        # Flip frame horizontally for natural viewing
-        frame = cv2.flip(frame, 1)
+        frame = cv2.flip(frame, 1)  # flip the frame horizontally for natural viewing
         
-        # Convert frame to grayscale for simplicity
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        # draw boxes on the frame for gesture detection areas
+        cv2.rectangle(frame, LEFT_BOX[:2], (LEFT_BOX[0] + LEFT_BOX[2], LEFT_BOX[1] + LEFT_BOX[3]), (0, 255, 0), 2)
+        cv2.rectangle(frame, RIGHT_BOX[:2], (RIGHT_BOX[0] + RIGHT_BOX[2], RIGHT_BOX[1] + RIGHT_BOX[3]), (0, 255, 0), 2)
         
-        # Smooth the image to reduce noise
-        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+        # convert frame to rgb for mediapipe
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        result = hands.process(frame_rgb)
         
-        # Detect edges using Canny edge detector
-        edges = cv2.Canny(blurred, 50, 150)
-        
-        # Find contours in the edged image
-        contours, _ = cv2.findContours(edges.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        
-        if len(contours) > 0:
-            # Find the largest contour, which should be the hand
-            contour = max(contours, key=cv2.contourArea)
-            
-            # Ensure the contour area is large enough to be considered a hand
-            if cv2.contourArea(contour) > GESTURE_THRESHOLD:
-                # Get bounding box coordinates
-                x, y, w, h = cv2.boundingRect(contour)
+        if result.multi_hand_landmarks:
+            for hand_landmarks in result.multi_hand_landmarks:
+                mp_draw.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)  # draw landmarks and connections
                 
-                # Draw the bounding box around the detected hand
-                cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
-                
-                # Calculate the centroid of the hand
-                centroid_x = x + w // 2
-                centroid_y = y + h // 2
-                
-                # Check for gesture start (left edge of hand)
-                if start_x is None:
-                    start_x = centroid_x
-                
-                # Detect left or right swipe based on hand movement
-                if centroid_x < start_x - GESTURE_THRESHOLD:
-                    control_powerpoint("left")
-                    start_x = centroid_x  # Reset start position for next gesture detection
-                    gesture_detected = True
-                elif centroid_x > start_x + GESTURE_THRESHOLD:
-                    control_powerpoint("right")
-                    start_x = centroid_x  # Reset start position for next gesture detection
-                    gesture_detected = True
+                for lm in hand_landmarks.landmark:
+                    x = int(lm.x * frame.shape[1])  # x coordinate of the landmark in the frame
+                    y = int(lm.y * frame.shape[0])  # y coordinate of the landmark in the frame
+                    
+                    # check if hand is in the left box
+                    if LEFT_BOX[0] <= x <= LEFT_BOX[0] + LEFT_BOX[2] and LEFT_BOX[1] <= y <= LEFT_BOX[1] + LEFT_BOX[3]:
+                        control_powerpoint("left")  # call function to control powerpoint for left gesture
+                        break
+                    # check if hand is in the right box
+                    elif RIGHT_BOX[0] <= x <= RIGHT_BOX[0] + RIGHT_BOX[2] and RIGHT_BOX[1] <= y <= RIGHT_BOX[1] + RIGHT_BOX[3]:
+                        control_powerpoint("right")  # call function to control powerpoint for right gesture
+                        break
         
-        # Display the frame with annotations
-        cv2.imshow('Gesture Control', frame)
+        # display the frame with annotations
+        cv2.imshow('gesture control', frame)
         
-        # Exit on 'q' key press
+        # exit loop on 'q' key press
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
     
-    # Release the camera and close all OpenCV windows
+    # release the camera and close opencv windows
     cap.release()
     cv2.destroyAllWindows()
 
